@@ -2,33 +2,31 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="Naapuruston Elinvoimamittari", layout="wide")
+st.set_page_config(page_title="Naapuruston Elinvoimamittari v2.2", layout="wide")
 
 @st.cache_data
 def load_data():
+    # Luetaan data ja siivotaan sarakkeiden nimet heti
     df = pd.read_csv('paavo_master.csv')
     df['Postinumero'] = df['Postinumero'].astype(str).str.zfill(5)
+    
+    # TÄRKEÄ: Poistetaan nimistä mahdolliset piilomerkit ja välilyönnit
+    df.columns = [col.strip().replace('\ufeff', '') for col in df.columns]
     return df
 
 df = load_data()
 
-# Ikäryhmät graafia varten
-ika_ryhmat = [
-    '0-2-vuotiaat (HE)', '3-6-vuotiaat (HE)', '7-12-vuotiaat (HE)', 
-    '13-15-vuotiaat (HE)', '16-17-vuotiaat (HE)', '18-19-vuotiaat (HE)',
-    '20-24-vuotiaat (HE)', '25-29-vuotiaat (HE)', '30-34-vuotiaat (HE)',
-    '35-39-vuotiaat (HE)', '40-44-vuotiaat (HE)', '45-49-vuotiaat (HE)',
-    '50-54-vuotiaat (HE)', '55-59-vuotiaat (HE)', '60-64-vuotiaat (HE)',
-    '65-69-vuotiaat (HE)', '70-74-vuotiaat (HE)', '75-79-vuotiaat (HE)',
-    '80-84-vuotiaat (HE)', '85 vuotta täyttäneet (HE)'
-]
+# Apufunktio turvalliseen datan hakuun
+def hae_arvo(row, osa_nimesta, oletus=0):
+    for col in row.index:
+        if osa_nimesta in col:
+            return row[col]
+    return oletus
 
-st.title("🏘️ Naapuruston Elinvoimamittari v2.0")
-
-tab1, tab2 = st.tabs(["🔍 Aluehaku", "⚔️ Alueiden taistelu"])
+st.title("🏘️ Naapuruston Elinvoimamittari")
 
 def nayta_statsit(row, context, p_nro, winner_tags=None, suffix=""):
-    context.subheader(f"{row['Alueen_nimi']} ({p_nro})")
+    context.subheader(f"{row.get('Alueen_nimi', 'Tuntematon')} ({p_nro})")
     
     if winner_tags:
         for tag in winner_tags:
@@ -36,75 +34,68 @@ def nayta_statsit(row, context, p_nro, winner_tags=None, suffix=""):
 
     # MITTARIT - Rivi 1 (Perustiedot)
     m1, m2, m3 = context.columns(3)
-    m1.metric("Asukkaita", f"{int(row['Asukkaat yhteensä (HE)'])} kpl")
-    m2.metric("Keskitulo", f"{int(row['Asukkaiden keskitulot (HR)'])} €/v")
-    m3.metric("Keski-ikä", f"{row['Asukkaiden keski-ikä (HE)']} v")
+    asukkaat = hae_arvo(row, 'Asukkaat yhteensä (HE)')
+    m1.metric("Asukkaita", f"{int(asukkaat)} kpl")
+    m2.metric("Keskitulo", f"{int(hae_arvo(row, 'Asukkaiden keskitulot'))} €/v")
+    m3.metric("Keski-ikä", f"{hae_arvo(row, 'Asukkaiden keski-ikä')} v")
     
-    # MITTARIT - Rivi 2 (Uusi data!)
+    # MITTARIT - Rivi 2 (Uusi data)
     m4, m5, m6 = context.columns(3)
     
-    # Koulutus: Lasketaan korkeakoulutettujen osuus 18v täyttäneistä
-    korkea = (row['Ylemmän korkeakoulututkinnon suorittaneet (KO)'] / row['18 vuotta täyttäneet yhteensä (KO)']) * 100
-    m4.metric("Korkeakoulutetut", f"{korkea:.1f} %")
-    
-    # Työllisyys: Työllisten osuus asukkaista
-    tyo = (row['Työlliset (PT)'] / row['Asukkaat yhteensä (HE)']) * 100
-    m5.metric("Työllisyysaste", f"{tyo:.1f} %")
-    
-    # Asuminen: Keskipinta-ala
-    m6.metric("Asunnon koko (ka)", f"{row['Asuntojen keskipinta-ala (RA)']} m²")
-
-    # Ikäjakauma
-    ika_data = pd.DataFrame({
-        'Ikä': [c.replace(' (HE)', '') for c in ika_ryhmat],
-        'Määrä': [row[c] for c in ika_ryhmat]
-    })
-    fig = px.bar(ika_data, x='Ikä', y='Määrä', color='Määrä', height=300)
-    fig.update_layout(margin=dict(l=0, r=0, t=20, b=0), showlegend=False)
-    context.plotly_chart(fig, use_container_width=True, key=f"chart_{p_nro}_{suffix}")
-
-# TAB 1: ALUEHAKU
-with tab1:
-    search_input = st.text_input("Hae postinumerolla:", key="search_bar").strip()
-    if search_input:
-        q = search_input.zfill(5)
-        res = df[df['Postinumero'] == q]
-        if not res.empty:
-            nayta_statsit(res.iloc[0], st, q, suffix="single")
-        else:
-            st.warning("Aluetta ei löytynyt.")
-
-# TAB 2: VERTAILU
-with tab2:
-    st.write("Vertaile kahta aluetta vastakkain!")
-    c1, c2 = st.columns(2)
-    p1_in = c1.text_input("Alue 1:", key="v1").strip()
-    p2_in = c2.text_input("Alue 2:", key="v2").strip()
-    
-    if p1_in and p2_in:
-        p1, p2 = p1_in.zfill(5), p2_in.zfill(5)
-        r1, r2 = df[df['Postinumero'] == p1], df[df['Postinumero'] == p2]
+    # Koulutusaste
+    ylempi = hae_arvo(row, 'Ylemmän korkeakoulututkinnon')
+    k_yhteensa = hae_arvo(row, '18 vuotta täyttäneet yhteensä (KO)')
+    if k_yhteensa > 0:
+        m4.metric("Korkeakoulutetut", f"{(ylempi/k_yhteensa)*100:.1f} %")
+    else:
+        m4.metric("Korkeakoulutetut", "---")
         
-        if not r1.empty and not r2.empty:
-            row1, row2 = r1.iloc[0], r2.iloc[0]
-            w1, w2 = [], []
-            
-            # Koulutusvoittaja
-            k1 = row1['Ylemmän korkeakoulututkinnon suorittaneet (KO)'] / row1['18 vuotta täyttäneet yhteensä (KO)']
-            k2 = row2['Ylemmän korkeakoulututkinnon suorittaneet (KO)'] / row2['18 vuotta täyttäneet yhteensä (KO)']
-            if k1 > k2: w1.append("🎓 Korkeakoulutetumpi")
-            else: w2.append("🎓 Korkeakoulutetumpi")
-            
-            # Pinta-alavoittaja
-            if row1['Asuntojen keskipinta-ala (RA)'] > row2['Asuntojen keskipinta-ala (RA)']:
-                w1.append("🏠 Väljempää asumista")
-            else:
-                w2.append("🏠 Väljempää asumista")
-            
-            nayta_statsit(row1, c1, p1, w1, suffix="c1")
-            nayta_statsit(row2, c2, p2, w2, suffix="c2")
+    # Työllisyys
+    tyolliset = hae_arvo(row, 'Työlliset (PT)')
+    if asukkaat > 0:
+        m5.metric("Työllisyysaste", f"{(tyolliset/asukkaat)*100:.1f} %")
+    
+    # Asuminen
+    pinta_ala = hae_arvo(row, 'Asuntojen keskipinta-ala')
+    m6.metric("Asunnon koko (ka)", f"{pinta_ala} m²")
 
-st.sidebar.header("Suomen kärki")
-top_5 = df.sort_values('Asukkaiden keskitulot (HR)', ascending=False).head(5)
-for i, r in top_5.iterrows():
-    st.sidebar.write(f"{r['Postinumero']} {r['Alueen_nimi']}")
+    # Ikäjakauma-graafi
+    ika_cols = [c for c in row.index if '(HE)' in c and '-' in c]
+    if ika_cols:
+        ika_data = pd.DataFrame({
+            'Ikä': [c.replace(' (HE)', '') for c in ika_cols],
+            'Määrä': [row[c] for c in ika_cols]
+        })
+        fig = px.bar(ika_data, x='Ikä', y='Määrä', color='Määrä', height=300)
+        fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), showlegend=False)
+        context.plotly_chart(fig, use_container_width=True, key=f"ch_{p_nro}_{suffix}")
+
+tab1, tab2 = st.tabs(["🔍 Aluehaku", "⚔️ Vertailu"])
+
+with tab1:
+    haku = st.text_input("Hae postinumerolla:", key="h1").strip().zfill(5)
+    if haku != "00000":
+        r = df[df['Postinumero'] == haku]
+        if not r.empty:
+            nayta_statsit(r.iloc[0], st, haku, suffix="s")
+
+with tab2:
+    col_a, col_b = st.columns(2)
+    p1 = col_a.text_input("Alue 1:", key="v1").strip().zfill(5)
+    p2 = col_b.text_input("Alue 2:", key="v2").strip().zfill(5)
+    
+    if p1 != "00000" and p2 != "00000" and p1 != p2:
+        res1, res2 = df[df['Postinumero'] == p1], df[df['Postinumero'] == p2]
+        if not res1.empty and not res2.empty:
+            row1, row2 = res1.iloc[0], res2.iloc[0]
+            
+            # VOITTAJA-LOGIIKKA
+            w1, w2 = [], []
+            # Sivistysvoittaja
+            s1 = hae_arvo(row1, 'Ylemmän korkeakoulututkinnon') / max(1, hae_arvo(row1, '18 vuotta täyttäneet yhteensä (KO)'))
+            s2 = hae_arvo(row2, 'Ylemmän korkeakoulututkinnon') / max(1, hae_arvo(row2, '18 vuotta täyttäneet yhteensä (KO)'))
+            if s1 > s2: w1.append("🎓 Sivistyneempi")
+            elif s2 > s1: w2.append("🎓 Sivistyneempi")
+            
+            nayta_statsit(row1, col_a, p1, winner_tags=w1, suffix="v1")
+            nayta_statsit(row2, col_b, p2, winner_tags=w2, suffix="v2")
