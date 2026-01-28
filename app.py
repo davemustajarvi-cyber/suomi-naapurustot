@@ -24,10 +24,10 @@ if valittu_alue:
     
     url = "https://api.finna.fi/v1/search"
     params = {
-        "lookfor": f"Tampere {valittu_alue}",
+        "lookfor": f'Tampere "{valittu_alue}"', # Lisätty lainausmerkit alueen ympärille
         "filter[]": [
             'format:0/Image/',
-            'usage_rights_str_mv:usage_all' # Vapaasti käytettävät kuvat
+            'online_boolean:1' # Varmistaa, että kuva on katsottavissa verkossa
         ],
         "limit": 20,
         "field[]": ["title", "images", "year", "buildings", "id"]
