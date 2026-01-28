@@ -1,44 +1,13 @@
-import streamlit as st
-import requests
-
-st.set_page_config(page_title="Tampereen Aikamatka", page_icon="📸", layout="wide")
-
-st.title("📸 Tampereen Aikamatka")
-st.write("Valitse kaupunginosa ja aikakausi kurkistatksesi menneisyyteen.")
-
-# --- SIVUPALKKI / VALINNAT ---
-st.sidebar.header("Hakuehdot")
-
-# 1. Kaupunginosat
-kaupunginosat = [
-    "Amuri", "Epilä", "Hatanpää", "Hervanta", "Järvensivu", 
-    "Kaleva", "Keskustori", "Lielahti", "Messukylä", "Nekala", 
-    "Pispala", "Pyynikki", "Ratina", "Tammela", "Viinikka"
-]
-valittu_alue = st.sidebar.selectbox("Valitse alue:", kaupunginosat)
-
-# 2. Vuosisuodatin (Slider)
-# Alkuarvona (1900, 1960)
-vuodet = st.sidebar.slider(
-    "Valitse aikaväli:", 
-    min_value=1850, 
-    max_value=2025, 
-    value=(1900, 1960)
-)
-
-# --- API-HAKU ---
-if valittu_alue:
-    url = "https://api.finna.fi/v1/search"
-    
-    # Muodostetaan parametrit
+# 1. Tarkempi API-suodatin
     params = {
         "lookfor": f'Tampere "{valittu_alue}"',
         "filter[]": [
             'format:0/Image/',
             'online_boolean:1',
-            f'search_daterange_mv:["{vuodet[0]}-{vuodet[1]}"]' # AIKASUODATIN
+            # Huom: Finna käyttää usein tätä syntaksia aikaväleille
+            f'daterange:[{vuodet[0]} TO {vuodet[1]}]'
         ],
-        "limit": 24,
+        "limit": 50, # Haetaan vähän enemmän, jotta voidaan siivota käsin
         "field[]": ["title", "images", "year", "buildings", "id"]
     }
 
@@ -46,27 +15,32 @@ if valittu_alue:
         response = requests.get(url, params=params)
         data = response.json()
 
-    # --- TULOSTEN NÄYTTÄMINEN ---
     if "records" in data and data["records"]:
-        st.subheader(f"Löytyi {data['resultCount']} kuvaa ajalta {vuodet[0]}–{vuodet[1]}")
+        # 2. TUPLAVARMISTUS: Suodatetaan tulokset vielä Pythonilla
+        valid_records = []
+        for r in data["records"]:
+            year_str = r.get("year")
+            if year_str and year_str.isdigit():
+                y = int(year_str)
+                if vuodet[0] <= y <= vuodet[1]:
+                    valid_records.append(r)
         
-        # Näytetään kuvat ruudukkona (3 kuvaa rinnakkain)
-        cols = st.columns(3)
-        for idx, record in enumerate(data["records"]):
-            with cols[idx % 3]:
-                if "images" in record:
-                    img_url = "https://api.finna.fi" + record["images"][0]
-                    st.image(img_url, use_container_width=True)
-                
-                vuosi = record.get("year", "N/A")
-                st.write(f"**{record['title']}** ({vuosi})")
-                
-                if "buildings" in record:
-                    lahde = record["buildings"][0].get("translated", "Arkisto")
-                    st.caption(f"Lähde: {lahde}")
-                st.divider()
-    else:
-        st.warning(f"Ei löytynyt kuvia valitulla aikavälillä {vuodet[0]}–{vuodet[1]}. Kokeile laajempaa haku-aluetta!")
-
-st.sidebar.markdown("---")
-st.sidebar.caption("Data: Finna.fi API")
+        st.subheader(f"Löytyi {len(valid_records)} kuvaa väliltä {vuodet[0]}–{vuodet[1]}")
+        
+        if valid_records:
+            cols = st.columns(3)
+            for idx, record in enumerate(valid_records[:24]): # Näytetään max 24
+                with cols[idx % 3]:
+                    if "images" in record:
+                        img_url = "https://api.finna.fi" + record["images"][0]
+                        st.image(img_url, use_container_width=True)
+                    
+                    vuosi = record.get("year", "N/A")
+                    st.write(f"**{record['title']}** ({vuosi})")
+                    
+                    if "buildings" in record:
+                        lahde = record["buildings"][0].get("translated", "Arkisto")
+                        st.caption(f"Lähde: {lahde}")
+                    st.divider()
+        else:
+            st.warning("Ei tarkkoja osumia tälle aikavälille. Kokeile laajempaa hakua!")
